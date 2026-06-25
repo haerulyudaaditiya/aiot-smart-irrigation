@@ -1,0 +1,28 @@
+# Virtual Environment
+model_training/venv/
+venv/
+.venv/
+env/
+.env/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Local configuration / OS junk
+.DS_Store
+Thumbs.db
+
+# Arduino build folders (if any)
+build/
+bin/
