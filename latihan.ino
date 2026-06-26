@@ -1,86 +1,56 @@
 /*
  * ============================================================
  *  AIoT Smart Irrigation System
- *  ESP32 + ML (Flask Server) + Multi-Sensor
- * ============================================================
- *  Sensor Input:
- *    - DHT22 (Suhu & Kelembapan Udara)
- *    - Capacitive Soil Moisture Sensor
- *    - Rain Sensor (Water Level)
- *
- *  Output:
- *    - Relay → Solenoid (simulasi valve/pompa)
- *    - LCD 16x2 I2C (status & prediksi ML)
- *    - LED Merah (perlu siram) & Hijau (aman)
- *
- *  Komunikasi:
- *    - WiFi HTTP POST ke Flask Server (ML Inference)
- *
- *  Library yang dibutuhkan (install via Arduino Library Manager):
- *    1. DHT sensor library (by Adafruit)
- *    2. Adafruit Unified Sensor
- *    3. ArduinoJson (by Benoit Blanchon)
- *    4. LiquidCrystal I2C (by Frank de Brabander)
+ *  ESP32 + ML (Flask Server) + Multi-Sensor (MQTT Version)
  * ============================================================
  */
 
 #include <WiFi.h>
-#include <HTTPClient.h>
+#include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
-// ============================================================
-// CONFIGURATION
-// ============================================================
-
+// WiFi Configuration
 const char* WIFI_SSID     = "S21 FE";
 const char* WIFI_PASSWORD  = "12345678";
-const char* SERVER_URL     = "http://10.107.135.216:5000/predict";
 
-// ============================================================
-// PIN DEFINITIONS
-// ============================================================
+// MQTT Configuration
+const char* MQTT_BROKER       = "broker.emqx.io";
+const int   MQTT_PORT         = 1883;
+const char* MQTT_TOPIC_SENSOR = "aiot/smart_irrigation/sensor";
+const char* MQTT_TOPIC_CONTROL = "aiot/smart_irrigation/control";
 
-// Sensor Pins
+// Pin Definitions
 #define DHTPIN            14    // DHT22 data pin
 #define DHTTYPE           DHT22
 #define SOIL_MOISTURE_PIN 32    // Capacitive Soil Moisture (Analog)
 #define WATER_LEVEL_PIN   34    // Water Level Sensor (Analog)
-
-// Output Pins
 #define RELAY_PIN         26    // Relay module signal
 #define LED_RED_PIN       4     // LED Merah (perlu siram)
 #define LED_GREEN_PIN     5     // LED Hijau (aman)
 
-// ============================================================
-// SENSOR CALIBRATION VALUES
-// ============================================================
-
+// Sensor Calibration Values
 const int SOIL_DRY   = 3400;
 const int SOIL_WET   = 1500;
 const int WATER_EMPTY = 0;
 const int WATER_FULL  = 3000;
 
-// ============================================================
-// INISIALISASI OBJEK
-// ============================================================
-
+// Object Initialization
 DHT dht(DHTPIN, DHTTYPE);
-LiquidCrystal_I2C lcd(0x27, 16, 2);  // Alamat I2C: 0x27 (umum), coba 0x3F jika tidak tampil
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
 
-// ============================================================
-// VARIABEL GLOBAL
-// ============================================================
-
+// Global Variables
 float temperature    = 0;
 float humidity       = 0;
 int   soilMoisture   = 0;
 int   waterLevel     = 0;
 
 int   prediction     = -1;     // -1=belum ada, 0=tidak siram, 1=siram, 2=siram banyak
-int   action         = 0;      // 0=relay OFF, 1=relay ON (dari server)
+int   action         = 0;      // 0=relay OFF, 1=relay ON
 float confidence     = 0;
 String predLabel     = "---";
 
@@ -89,32 +59,38 @@ const unsigned long SEND_INTERVAL = 5000;  // Kirim setiap 5 detik
 
 bool serverConnected = false;
 
-// ============================================================
-// SETUP
-// ============================================================
+// Function Prototypes
+void connectWiFi();
+void reconnectMQTT();
+void readSensors();
+void printSensorData();
+void publishTelemetry();
+void controlOutputs();
+void updateLEDs();
+void updateLCD();
+void mqttCallback(char* topic, byte* payload, unsigned int length);
 
 void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println("╔════════════════════════════════════════╗");
-  Serial.println("║  AIoT Smart Irrigation System v1.0    ║");
-  Serial.println("║  ESP32 + Machine Learning             ║");
+  Serial.println("║      AIoT Smart Irrigation System      ║");
   Serial.println("╚════════════════════════════════════════╝");
 
-  // Inisialisasi pin output
+  // Initialize output pins
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(LED_RED_PIN, OUTPUT);
   pinMode(LED_GREEN_PIN, OUTPUT);
 
-  // Matikan semua output awal
+  // Turn off all outputs initially
   digitalWrite(RELAY_PIN, LOW);
   digitalWrite(LED_RED_PIN, LOW);
   digitalWrite(LED_GREEN_PIN, LOW);
 
-  // Inisialisasi DHT22
+  // Initialize DHT22
   dht.begin();
 
-  // Inisialisasi LCD
+  // Initialize LCD
   Wire.begin(21, 22);  // SDA=21, SCL=22
   lcd.init();
   lcd.backlight();
@@ -123,25 +99,41 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("Connecting WiFi");
 
-  // Koneksi WiFi
+  // Connect to WiFi
   connectWiFi();
 
-  // Tampilkan IP di LCD
+  // Show IP on LCD
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("IP:");
   lcd.print(WiFi.localIP());
   lcd.setCursor(0, 1);
-  lcd.print("Sistem Siap!");
-  delay(2000);
+  lcd.print("Connecting MQTT");
+  delay(1000);
+
+  // Initialize MQTT
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
+  reconnectMQTT();
+
+  if (mqttClient.connected()) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("MQTT Connected!");
+    lcd.setCursor(0, 1);
+    lcd.print("Sistem Siap!");
+  } else {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("MQTT Failed!");
+    lcd.setCursor(0, 1);
+    lcd.print("Sistem Siap!");
+  }
+  delay(1500);
 }
 
-// ============================================================
-// LOOP UTAMA
-// ============================================================
-
 void loop() {
-  // Cek koneksi WiFi
+  // Reconnect WiFi if disconnected
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[!] WiFi terputus, reconnecting...");
     lcd.clear();
@@ -152,33 +144,37 @@ void loop() {
     connectWiFi();
   }
 
-  // Kirim data setiap SEND_INTERVAL
+  // Reconnect MQTT if disconnected
+  if (WiFi.status() == WL_CONNECTED && !mqttClient.connected()) {
+    reconnectMQTT();
+  }
+
+  // Run MQTT loop
+  mqttClient.loop();
+
+  // Send telemetry at SEND_INTERVAL
   if (millis() - lastSendTime >= SEND_INTERVAL) {
     lastSendTime = millis();
 
-    // 1. Baca semua sensor
+    // 1. Read all sensors
     readSensors();
 
-    // 2. Tampilkan data sensor ke Serial
+    // 2. Print sensor data to Serial
     printSensorData();
 
-    // 3. Kirim ke Flask server & terima prediksi
-    sendToServer();
+    // 3. Publish to MQTT Broker
+    publishTelemetry();
 
-    // 4. Kontrol output berdasarkan prediksi
+    // 4. Control outputs based on prediction
     controlOutputs();
 
     // 5. Update LCD
     updateLCD();
   }
 
-  // 6. Pembaruan LED (termasuk kedipan non-blocking jika air habis)
+  // 6. Update LEDs (including non-blocking blinking if tank is empty)
   updateLEDs();
 }
-
-// ============================================================
-// FUNGSI: Koneksi WiFi
-// ============================================================
 
 void connectWiFi() {
   Serial.print("[WiFi] Connecting to ");
@@ -198,7 +194,7 @@ void connectWiFi() {
     Serial.print("[WiFi] IP Address: ");
     Serial.println(WiFi.localIP());
 
-    // Indikator: kedua LED berkedip cepat 3x
+    // Indicator: both LEDs blink fast 3 times
     for (int i = 0; i < 3; i++) {
       digitalWrite(LED_GREEN_PIN, HIGH);
       digitalWrite(LED_RED_PIN, HIGH);
@@ -218,12 +214,54 @@ void connectWiFi() {
   }
 }
 
-// ============================================================
-// FUNGSI: Baca Semua Sensor
-// ============================================================
+void reconnectMQTT() {
+  int attempts = 0;
+  while (!mqttClient.connected() && attempts < 5) {
+    Serial.print("[MQTT] Mencoba menghubungkan ke broker...");
+    // Generate unique client ID
+    String clientId = "ESP32Client-" + String(random(0xffff), HEX);
+    
+    if (mqttClient.connect(clientId.c_str())) {
+      Serial.println(" Connected!");
+      // Subscribe to control topic
+      mqttClient.subscribe(MQTT_TOPIC_CONTROL);
+      Serial.printf("[MQTT] Subscribed ke: %s\n", MQTT_TOPIC_CONTROL);
+    } else {
+      Serial.print(" Gagal, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" Coba lagi dalam 2 detik...");
+      delay(2000);
+      attempts++;
+    }
+  }
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("[MQTT] Pesan masuk di topik: ");
+  Serial.println(topic);
+
+  // Parse payload JSON
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, payload, length);
+
+  if (!error) {
+    prediction = doc["prediction"].as<int>();
+    action     = doc["action"].as<int>();  // 0=OFF, 1=ON
+    confidence = doc["confidence"].as<float>();
+    predLabel  = doc["label"].as<String>();
+    serverConnected = true;
+
+    Serial.printf("[MQTT] ML Prediksi: %s (confidence: %.1f%%) -> Relay: %s\n",
+                   predLabel.c_str(), confidence * 100,
+                   action == 1 ? "ON" : "OFF");
+  } else {
+    Serial.print("[!] Gagal parse JSON MQTT callback: ");
+    Serial.println(error.c_str());
+  }
+}
 
 void readSensors() {
-  // --- DHT22: Suhu & Kelembapan Udara ---
+  // DHT22: Temperature & Humidity
   float t = dht.readTemperature();
   float h = dht.readHumidity();
 
@@ -234,46 +272,33 @@ void readSensors() {
     Serial.println("[!] DHT22 error, pakai data terakhir.");
   }
 
-  // --- Soil Moisture Sensor (Analog) ---
+  // Soil Moisture Sensor (Analog)
   int rawSoil = analogRead(SOIL_MOISTURE_PIN);
   soilMoisture = map(rawSoil, SOIL_DRY, SOIL_WET, 0, 100);
   soilMoisture = constrain(soilMoisture, 0, 100);
 
-  // --- Water Level Sensor (Analog) ---
+  // Water Level Sensor (Analog)
   int rawWater = analogRead(WATER_LEVEL_PIN);
   waterLevel = map(rawWater, WATER_EMPTY, WATER_FULL, 0, 100);
   waterLevel = constrain(waterLevel, 0, 100);
 }
 
-// ============================================================
-// FUNGSI: Print Data Sensor ke Serial
-// ============================================================
-
 void printSensorData() {
   Serial.println("-------------------------------------");
   Serial.printf("Suhu        : %.1f °C\n", temperature);
   Serial.printf("Kelembapan  : %.1f %%\n", humidity);
-  Serial.printf("Tanah       : %d %%\n", soilMoisture);
-  Serial.printf("Level Air   : %d %%\n", waterLevel);
+  Serial.printf("Kelembapan Tanah : %d %%\n", soilMoisture);
+  Serial.printf("Level Tangki Air : %d %%\n", waterLevel);
 }
 
-// ============================================================
-// FUNGSI: Kirim Data ke Flask Server
-// ============================================================
-
-void sendToServer() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[!] WiFi tidak terhubung, skip pengiriman.");
+void publishTelemetry() {
+  if (!mqttClient.connected()) {
+    Serial.println("[!] MQTT tidak terhubung, skip publish.");
     serverConnected = false;
     return;
   }
 
-  HTTPClient http;
-  http.begin(SERVER_URL);
-  http.addHeader("Content-Type", "application/json");
-  http.setTimeout(5000);  // Timeout 5 detik
-
-  // Buat JSON payload
+  // Create JSON payload
   JsonDocument doc;
   doc["temperature"]    = temperature;
   doc["humidity"]       = humidity;
@@ -283,96 +308,55 @@ void sendToServer() {
   String jsonPayload;
   serializeJson(doc, jsonPayload);
 
-  Serial.print("[HTTP] POST → ");
-  Serial.println(SERVER_URL);
-  Serial.print("[HTTP] Payload: ");
+  Serial.print("[MQTT] Publish → ");
+  Serial.println(MQTT_TOPIC_SENSOR);
+  Serial.print("[MQTT] Payload: ");
   Serial.println(jsonPayload);
 
-  // Kirim HTTP POST
-  int httpCode = http.POST(jsonPayload);
-
-  if (httpCode == 200) {
-    String response = http.getString();
-    Serial.print("[HTTP] Response: ");
-    Serial.println(response);
-
-    // Parse JSON response
-    JsonDocument resDoc;
-    DeserializationError error = deserializeJson(resDoc, response);
-
-    if (!error) {
-      prediction = resDoc["prediction"].as<int>();
-      action     = resDoc["action"].as<int>();  // 0=OFF, 1=ON
-      confidence = resDoc["confidence"].as<float>();
-      predLabel  = resDoc["label"].as<String>();
-      serverConnected = true;
-
-      Serial.printf("ML Prediksi: %s (confidence: %.1f%%) -> Relay: %s\n",
-                     predLabel.c_str(), confidence * 100,
-                     action == 1 ? "ON" : "OFF");
-    } else {
-      Serial.println("[!] JSON parse error!");
-      serverConnected = false;
-    }
+  if (mqttClient.publish(MQTT_TOPIC_SENSOR, jsonPayload.c_str())) {
+    Serial.println("[MQTT] Telemetry berhasil dipublish!");
   } else {
-    Serial.printf("[!] HTTP error code: %d\n", httpCode);
-    Serial.println("[!] Pastikan Flask server jalan di laptop.");
-    serverConnected = false;
-    prediction = -1;
-    predLabel = "ERR";
+    Serial.println("[!] Gagal publish telemetry!");
   }
-
-  http.end();
 }
-
-// ============================================================
-// FUNGSI: Kontrol Output (Relay, LED)
-// ============================================================
 
 void controlOutputs() {
   if (prediction < 0) {
-    // BELUM ADA PREDIKSI / ERROR
     digitalWrite(RELAY_PIN, LOW);      // Safety: relay OFF
     Serial.println("[AKSI] Menunggu prediksi dari server...");
     return;
   }
 
-  // LOGIKA OVERRIDE: Proteksi Tangki Air Kosong
+  // Override: Protection when water tank is empty
   if (waterLevel < 15) {
-    digitalWrite(RELAY_PIN, LOW);      // Matikan penyiraman
+    digitalWrite(RELAY_PIN, LOW);      // Turn off watering
     Serial.println("[AKSI] Override: Sumber air habis! Penyiraman dinonaktifkan untuk proteksi.");
     return;
   }
 
-  // Gunakan field 'action' dari server (0=OFF, 1=ON)
+  // Use action from server
   if (action == 1) {
-    // PERLU SIRAM (prediction 1 atau 2)
-    digitalWrite(RELAY_PIN, HIGH);     // Relay ON -> Pompa menyala
+    digitalWrite(RELAY_PIN, HIGH);     // Relay ON -> Valve/Pump ON
     Serial.printf("[AKSI] Relay ON -> POMPA AKTIF (%s)\n", predLabel.c_str());
   } else {
-    // TIDAK PERLU SIRAM (prediction 0)
-    digitalWrite(RELAY_PIN, LOW);      // Relay OFF -> Pompa mati
+    digitalWrite(RELAY_PIN, LOW);      // Relay OFF -> Valve/Pump OFF
     Serial.println("[AKSI] Relay OFF -> Pompa MATI (aman)");
   }
 }
-
-// ============================================================
-// FUNGSI: Pembaruan LED Indikator (Non-Blocking)
-// ============================================================
 
 unsigned long lastBlinkTime = 0;
 bool ledState = LOW;
 
 void updateLEDs() {
   if (prediction < 0) {
-    // BELUM ADA PREDIKSI / ERROR (Merah & Hijau menyala statis)
+    // Belum terhubung / error: Merah & Hijau menyala statis
     digitalWrite(LED_RED_PIN, HIGH);
     digitalWrite(LED_GREEN_PIN, HIGH);
     return;
   }
 
   if (waterLevel < 15) {
-    // AIR TANGKI HABIS -> LED Merah Kedap-kedip (500ms), LED Hijau OFF
+    // Air tangki habis -> LED Merah Kedap-kedip (500ms), LED Hijau OFF
     digitalWrite(LED_GREEN_PIN, LOW);
     if (millis() - lastBlinkTime >= 500) {
       lastBlinkTime = millis();
@@ -380,28 +364,23 @@ void updateLEDs() {
       digitalWrite(LED_RED_PIN, ledState);
     }
   } else {
-    // KONDISI AIR NORMAL (Mengikuti data prediksi)
+    // Kondisi air normal
     if (action == 1) {
-      // SEDANG MENYIRAM (Merah ON, Hijau OFF)
+      // Sedang menyiram: Merah ON, Hijau OFF
       digitalWrite(LED_RED_PIN, HIGH);
       digitalWrite(LED_GREEN_PIN, LOW);
     } else {
-      // KONDISI AMAN / TIDAK SIRAM (Merah OFF, Hijau ON)
+      // Kondisi aman: Merah OFF, Hijau ON
       digitalWrite(LED_RED_PIN, LOW);
       digitalWrite(LED_GREEN_PIN, HIGH);
     }
   }
 }
 
-// ============================================================
-// FUNGSI: Update LCD Display
-// ============================================================
-
 void updateLCD() {
   lcd.clear();
 
   if (!serverConnected && prediction == -1) {
-    // Belum terhubung ke server
     lcd.setCursor(0, 0);
     lcd.print("T:");
     lcd.print(temperature, 0);
@@ -410,13 +389,12 @@ void updateLCD() {
     lcd.print("%");
 
     lcd.setCursor(0, 1);
-    lcd.print("NO SERVER!");
+    lcd.print("NO SERVER/MQTT");
     return;
   }
 
-  // Baris 1: Data sensor (ringkas)
+  // Line 1: sensor data (compact)
   lcd.setCursor(0, 0);
-  // Format: T:32C H:65% S:45%
   lcd.print("T:");
   lcd.print(temperature, 0);
   lcd.print("C H:");
@@ -425,7 +403,7 @@ void updateLCD() {
   lcd.print(soilMoisture);
   lcd.print("%");
 
-  // Baris 2: Prediksi ML & Status Air Tangki
+  // Line 2: ML prediction & Water Tank Status
   lcd.setCursor(0, 1);
 
   if (waterLevel < 15) {
@@ -440,7 +418,6 @@ void updateLCD() {
     lcd.print("ML:WAIT  ");
   }
 
-  // Tampilkan sisa ruang dengan kapasitas air tangki (W: XX%)
   lcd.print(" W:");
   lcd.print(waterLevel);
   lcd.print("%");

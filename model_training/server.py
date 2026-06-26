@@ -1,11 +1,11 @@
 """
 ================================================================================
- AIoT Smart Irrigation System — Flask API Server (V2.0)
+ AIoT Smart Irrigation System — Flask API Server
 ================================================================================
  Menerima data sensor dari ESP32 via HTTP POST
  Menjalankan inferensi model ML menggunakan pipeline preprocessed pkl
  Mengembalikan prediksi ke ESP32
- 
+
  Kelas:
    0 = Tidak Siram
    1 = Siram
@@ -18,9 +18,10 @@ import json
 import datetime
 import csv
 import pandas as pd
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import joblib
+import paho.mqtt.client as mqtt
 
 # ==============================================================================
 # KONFIGURASI
@@ -29,7 +30,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
 LOG_FILE = os.path.join(OUTPUT_DIR, 'prediction_log.csv')
 HOST = '0.0.0.0'
-PORT = 5000
+PORT = int(os.environ.get('PORT', 5000))
+
+# MQTT CONFIGURATION
+MQTT_BROKER = os.environ.get('MQTT_BROKER', "broker.emqx.io")
+MQTT_PORT = int(os.environ.get('MQTT_PORT', 1883))
+MQTT_TOPIC_SENSOR = os.environ.get('MQTT_TOPIC_SENSOR', "aiot/smart_irrigation/sensor")
+MQTT_TOPIC_CONTROL = os.environ.get('MQTT_TOPIC_CONTROL', "aiot/smart_irrigation/control")
 
 # Label mapping
 LABEL_MAP = {0: 'TIDAK', 1: 'SIRAM', 2: 'BANYAK'}
@@ -39,6 +46,13 @@ ESP32_ACTION = {0: 0, 1: 1, 2: 1}  # 0 = relay OFF, 1 atau 2 = relay ON
 DEFAULT_CROP = 'Wheat'
 DEFAULT_SOIL = 'Black Soil'
 DEFAULT_STAGE = 'Germination'
+
+# Dynamic ML Configuration
+ACTIVE_CONFIG = {
+    'crop_id': DEFAULT_CROP,
+    'soil_type': DEFAULT_SOIL,
+    'seedling_stage': DEFAULT_STAGE
+}
 
 # ==============================================================================
 # INISIALISASI SERVER
@@ -60,6 +74,57 @@ except Exception as e:
     summary = None
 
 prediction_history = []
+
+
+def load_prediction_history_from_csv():
+    """Memuat data riwayat dari CSV ke memori saat startup."""
+    global prediction_history
+    if not os.path.exists(LOG_FILE):
+        return
+    try:
+        temp_history = []
+        with open(LOG_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    pred = int(row.get('prediction', 0))
+                    confidence = float(row.get('confidence', 0.0))
+                    label = row.get('label', 'TIDAK')
+                    action = ESP32_ACTION.get(pred, 0)
+                    
+                    item = {
+                        'prediction': pred,
+                        'label': label,
+                        'action': action,
+                        'confidence': round(confidence, 5),
+                        'water_level': int(row.get('water_level', 100)),
+                        'probabilities': {
+                            'TIDAK': 0.0,
+                            'SIRAM': 0.0,
+                            'BANYAK': 0.0
+                        },
+                        'processed_features': {
+                            'temperature': float(row.get('temperature', 0)),
+                            'humidity': float(row.get('humidity', 0)),
+                            'soil_moisture': float(row.get('soil_moisture', 0)),
+                            'crop_id': row.get('crop_id', 'Wheat'),
+                            'soil_type': row.get('soil_type', 'Black Soil'),
+                            'seedling_stage': row.get('seedling_stage', 'Germination')
+                        },
+                        'timestamp': row.get('timestamp', datetime.datetime.now().isoformat())
+                    }
+                    temp_history.append(item)
+                except Exception:
+                    continue
+        prediction_history = temp_history[-100:]
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [LOG] Berhasil memuat {len(prediction_history)} riwayat dari CSV.")
+    except Exception as e:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [LOG] Gagal memuat riwayat dari CSV: {e}")
+
+
+# Muat riwayat saat startup
+load_prediction_history_from_csv()
+
 
 
 def log_prediction(sensor_data, prediction, confidence, label):
@@ -96,20 +161,35 @@ def log_prediction(sensor_data, prediction, confidence, label):
 
 @app.route('/', methods=['GET'])
 def home():
-    """Endpoint informasi status server."""
-    return jsonify({
-        'name': 'AIoT Smart Irrigation API Server',
-        'version': '2.0',
-        'status': 'running',
-        'model_loaded': MODEL_LOADED,
-        'model_accuracy': f"{summary['accuracy']*100:.3f}%" if summary else None,
-        'endpoints': {
-            'POST /predict': 'Mengirimkan data sensor untuk diprediksi',
-            'GET /health': 'Memeriksa kesehatan koneksi server',
-            'GET /history': 'Mengambil riwayat prediksi terbaru',
-            'GET /model-info': 'Mengambil detail performa model'
-        }
-    })
+    """Render Web Dashboard utama."""
+    return render_template('index.html')
+
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Mengambil konfigurasi parameter aktif."""
+    return jsonify(ACTIVE_CONFIG)
+
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """Memperbarui konfigurasi parameter aktif."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Payload tidak valid.'}), 400
+
+        if 'crop_id' in data:
+            ACTIVE_CONFIG['crop_id'] = str(data['crop_id'])
+        if 'soil_type' in data:
+            ACTIVE_CONFIG['soil_type'] = str(data['soil_type'])
+        if 'seedling_stage' in data:
+            ACTIVE_CONFIG['seedling_stage'] = str(data['seedling_stage'])
+
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [CONFIG] Konfigurasi diubah: {ACTIVE_CONFIG}")
+        return jsonify({'status': 'success', 'config': ACTIVE_CONFIG})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/health', methods=['GET'])
@@ -122,114 +202,182 @@ def health():
     })
 
 
+def perform_inference(data):
+    """
+    Menjalankan inferensi prediksi irigasi cerdas berdasarkan data input.
+    Mengembalikan dictionary hasil prediksi atau raises Exception.
+    """
+    if not MODEL_LOADED:
+        raise ValueError('Pipeline model belum dimuat.')
+
+    # Ekstraksi dan penyesuaian nama parameter sensor
+    temp = data.get('temperature')
+    humidity = data.get('humidity')
+    moi = data.get('soil_moisture')
+
+    # Cek fallback jika nama parameter berbeda
+    if temp is None:
+        temp = data.get('temp') or data.get('suhu')
+    if humidity is None:
+        humidity = data.get('hum') or data.get('kelembapan')
+    if moi is None:
+        moi = data.get('MOI') or data.get('moisture')
+
+    # Validasi input numerik
+    if temp is None or humidity is None or moi is None:
+        raise ValueError('Fitur input numerik tidak lengkap.')
+
+    # Ekstraksi parameter kategorikal (menggunakan ACTIVE_CONFIG jika tidak dikirim)
+    crop_id = data.get('crop_id', ACTIVE_CONFIG['crop_id'])
+    soil_type = data.get('soil_type', ACTIVE_CONFIG['soil_type'])
+    seedling_stage = data.get('seedling_stage', ACTIVE_CONFIG['seedling_stage'])
+
+    # Buat DataFrame agar sesuai dengan pipeline preprocessor sklearn
+    input_data = pd.DataFrame([{
+        'crop ID': crop_id,
+        'soil_type': soil_type,
+        'Seedling Stage': seedling_stage,
+        'MOI': float(moi),
+        'temp': float(temp),
+        'humidity': float(humidity)
+    }])
+
+    # Lakukan inferensi prediksi menggunakan Pipeline
+    prediction = int(pipeline.predict(input_data)[0])
+    probabilities = pipeline.predict_proba(input_data)[0]
+    confidence = float(max(probabilities))
+
+    label = LABEL_MAP.get(prediction, 'UNKNOWN')
+    action = ESP32_ACTION.get(prediction, 0)
+
+    # Output payload
+    result = {
+        'prediction': prediction,
+        'label': label,
+        'action': action,
+        'confidence': round(confidence, 5),
+        'water_level': int(data.get('water_level', 100)),
+        'probabilities': {
+            LABEL_MAP[i]: round(float(p), 5)
+            for i, p in enumerate(probabilities)
+        },
+        'processed_features': {
+            'temperature': float(temp),
+            'humidity': float(humidity),
+            'soil_moisture': float(moi),
+            'crop_id': crop_id,
+            'soil_type': soil_type,
+            'seedling_stage': seedling_stage
+        },
+        'timestamp': datetime.datetime.now().isoformat()
+    }
+
+    # Logging ke file
+    log_prediction({
+        'temperature': temp,
+        'humidity': humidity,
+        'soil_moisture': moi,
+        'crop_id': crop_id,
+        'soil_type': soil_type,
+        'seedling_stage': seedling_stage
+    }, prediction, confidence, label)
+
+    # Simpan ke memori riwayat
+    prediction_history.append(result)
+    if len(prediction_history) > 100:
+        prediction_history.pop(0)
+
+    return result
+
+
 @app.route('/predict', methods=['POST'])
 def predict():
     """
-    Endpoint utama prediksi irigasi cerdas.
-    Menerima format data JSON dari ESP32.
+    Endpoint utama prediksi irigasi cerdas via HTTP POST.
     """
-    if not MODEL_LOADED:
-        return jsonify({'error': 'Pipeline model belum dimuat.'}), 503
-
     try:
         data = request.get_json()
         if not data:
             return jsonify({'error': 'Payload data tidak valid atau kosong.'}), 400
 
-        # Ekstraksi dan penyesuaian nama parameter sensor
-        # ESP32: temperature, humidity, soil_moisture
-        # Model: temp, humidity, MOI
-        temp = data.get('temperature')
-        humidity = data.get('humidity')
-        moi = data.get('soil_moisture')
-
-        # Cek fallback jika nama parameter berbeda
-        if temp is None:
-            temp = data.get('temp') or data.get('suhu')
-        if humidity is None:
-            humidity = data.get('hum') or data.get('kelembapan')
-        if moi is None:
-            moi = data.get('MOI') or data.get('moisture')
-
-        # Validasi input numerik
-        if temp is None or humidity is None or moi is None:
-            return jsonify({
-                'error': 'Fitur input numerik tidak lengkap.',
-                'required': ['temperature', 'humidity', 'soil_moisture'],
-                'received': data
-            }), 400
-
-        # Ekstraksi parameter kategorikal (menggunakan default jika tidak dikirim)
-        crop_id = data.get('crop_id', DEFAULT_CROP)
-        soil_type = data.get('soil_type', DEFAULT_SOIL)
-        seedling_stage = data.get('seedling_stage', DEFAULT_STAGE)
-
-        # Buat DataFrame agar sesuai dengan pipeline preprocessor sklearn
-        input_data = pd.DataFrame([{
-            'crop ID': crop_id,
-            'soil_type': soil_type,
-            'Seedling Stage': seedling_stage,
-            'MOI': float(moi),
-            'temp': float(temp),
-            'humidity': float(humidity)
-        }])
-
-        # Lakukan inferensi prediksi menggunakan Pipeline
-        prediction = int(pipeline.predict(input_data)[0])
-        probabilities = pipeline.predict_proba(input_data)[0]
-        confidence = float(max(probabilities))
-
-        label = LABEL_MAP.get(prediction, 'UNKNOWN')
-        action = ESP32_ACTION.get(prediction, 0)
-
-        # Output payload
-        result = {
-            'prediction': prediction,
-            'label': label,
-            'action': action,
-            'confidence': round(confidence, 5),
-            'probabilities': {
-                LABEL_MAP[i]: round(float(p), 5)
-                for i, p in enumerate(probabilities)
-            },
-            'processed_features': {
-                'temperature': float(temp),
-                'humidity': float(humidity),
-                'soil_moisture': float(moi),
-                'crop_id': crop_id,
-                'soil_type': soil_type,
-                'seedling_stage': seedling_stage
-            },
-            'timestamp': datetime.datetime.now().isoformat()
-        }
-
-        # Logging ke file
-        log_prediction({
-            'temperature': temp,
-            'humidity': humidity,
-            'soil_moisture': moi,
-            'crop_id': crop_id,
-            'soil_type': soil_type,
-            'seedling_stage': seedling_stage
-        }, prediction, confidence, label)
-
-        # Simpan ke memori riwayat
-        prediction_history.append(result)
-        if len(prediction_history) > 100:
-            prediction_history.pop(0)
+        result = perform_inference(data)
 
         # Print log server tanpa emotikon
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] "
-              f"Prediksi: {label} ({confidence*100:.2f}%) | "
-              f"Relay: {'ON' if action else 'OFF'} | "
-              f"Input: temp={temp}, hum={humidity}, soil_moisture={moi}, "
-              f"crop={crop_id}, soil={soil_type}, stage={seedling_stage}")
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [HTTP] "
+              f"Prediksi: {result['label']} ({result['confidence']*100:.2f}%) | "
+              f"Relay: {'ON' if result['action'] else 'OFF'} | "
+              f"Input: temp={result['processed_features']['temperature']}, hum={result['processed_features']['humidity']}, "
+              f"soil_moisture={result['processed_features']['soil_moisture']}, crop={result['processed_features']['crop_id']}")
 
         return jsonify(result)
 
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
     except Exception as e:
         print(f"Error pada inferensi model: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# ==============================================================================
+# MQTT CLIENT DAEMON
+# ==============================================================================
+mqtt_client = None
+
+def on_connect(client, userdata, flags, rc, properties=None):
+    """Callback saat terhubung ke broker MQTT."""
+    if rc == 0:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Terhubung ke Broker {MQTT_BROKER}")
+        client.subscribe(MQTT_TOPIC_SENSOR)
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Subscribed ke topik: {MQTT_TOPIC_SENSOR}")
+    else:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Gagal terhubung, return code {rc}")
+
+def on_message(client, userdata, msg):
+    """Callback saat menerima telemetry MQTT."""
+    try:
+        payload = msg.payload.decode('utf-8')
+        data = json.loads(payload)
+
+        result = perform_inference(data)
+
+        # Kirim balik keputusan ke topik kontrol
+        control_payload = {
+            'prediction': result['prediction'],
+            'label': result['label'],
+            'action': result['action'],
+            'confidence': result['confidence']
+        }
+        client.publish(MQTT_TOPIC_CONTROL, json.dumps(control_payload))
+
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] "
+              f"Telemetry Diterima. Prediksi: {result['label']} ({result['confidence']*100:.2f}%) | "
+              f"Relay: {'ON' if result['action'] else 'OFF'} | "
+              f"Published ke kontrol: {MQTT_TOPIC_CONTROL}")
+
+    except json.JSONDecodeError:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Payload bukan JSON: {msg.payload}")
+    except ValueError as ve:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Validasi telemetry gagal: {ve}")
+    except Exception as e:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Error: {e}")
+
+def start_mqtt_client():
+    """Inisialisasi MQTT client."""
+    global mqtt_client
+    try:
+        from paho.mqtt.enums import CallbackAPIVersion
+        mqtt_client = mqtt.Client(callback_api_version=CallbackAPIVersion.VERSION2)
+    except (ImportError, AttributeError):
+        mqtt_client = mqtt.Client()
+
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_message = on_message
+
+    try:
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+        mqtt_client.loop_start()
+    except Exception as e:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Gagal memulai client: {e}")
 
 
 @app.route('/history', methods=['GET'])
@@ -264,8 +412,13 @@ def model_info():
 # ==============================================================================
 if __name__ == '__main__':
     print("="*80)
-    print("  AIoT Smart Irrigation Flask API Server v2.0")
+    print("  AIoT Smart Irrigation Flask API Server")
     print("="*80)
     print(f"  Server berjalan pada host: {HOST}:{PORT}")
     print("="*80 + "\n")
+
+    # Jalankan client MQTT (hindari koneksi ganda jika dalam mode debug Flask)
+    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        start_mqtt_client()
+
     app.run(host=HOST, port=PORT, debug=True)

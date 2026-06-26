@@ -4,7 +4,6 @@
 ================================================================================
  Dataset  : Smart Agriculture Dataset (Kaggle - Public)
  Model    : Random Forest Classifier with Pipeline Preprocessing
- Author   : Haerulyuda Aditiya
  Date     : Juni 2026
  Version  : 2.0 (High Performance Edition)
 ================================================================================
@@ -319,7 +318,7 @@ def evaluate_and_plot_results(pipeline, X_train, X_test, y_train, y_test):
 
 def main():
     print("================================================================================")
-    print("  MEMULAI PIPELINE PELATIHAN MODEL AIoT IRIGASI CERDAS (V2.0)")
+    print("  MEMULAI PIPELINE PELATIHAN MODEL AIoT IRIGASI CERDAS")
     print("================================================================================")
     
     # 1. Cari & Load data
@@ -352,7 +351,7 @@ def main():
     pipeline_path = os.path.join(OUTPUT_DIR, 'model_pipeline.pkl')
     joblib.dump(pipeline, pipeline_path)
     print(f"\n[SUKSES] Pipeline model tersimpan di: {pipeline_path}")
-    print("Proses pembuatan model v2.0 selesai dengan sukses.")
+    print("Proses pembuatan model selesai dengan sukses.")
 
 
 if __name__ == '__main__':

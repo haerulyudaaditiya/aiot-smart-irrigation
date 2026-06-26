@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIoT Smart Irrigation System</title>
+    <meta name="description" content="Sistem Irigasi Cerdas berbasis IoT dengan integrasi Machine Learning (Random Forest) untuk optimalisasi penyiraman tanaman secara real-time.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- ApexCharts CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    
+    <style>
+        @keyframes slow-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-slow-spin {
+            animation: slow-spin 3s linear infinite;
+        }
+        .water-wave-transition {
+            transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.6s ease;
+        }
+        /* Custom scrollbar for logs */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased font-sans min-h-screen">
+
+    <div class="flex flex-col lg:flex-row min-h-screen">
+        
+        <!-- Sidebar / Brand & Config Panel -->
+        <aside class="w-full lg:w-80 lg:shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col justify-between" role="complementary" aria-label="Konfigurasi dan Status Sistem">
+            <div class="p-6">
+                <!-- Brand logo -->
+                <div class="mb-6 pb-4 border-b border-slate-100">
+                    <span class="block text-xl font-extrabold text-slate-900 tracking-tight leading-none">AIoT Smart</span>
+                    <span class="text-xs text-slate-500 font-semibold tracking-wider uppercase mt-1.5 block">Irrigation System</span>
+                </div>
+
+                <!-- Server & Connection Status -->
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="relative flex h-2.5 w-2.5">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                        </span>
+                        <span class="text-sm font-semibold text-slate-700">Server Aktif</span>
+                    </div>
+                    <div class="text-xs text-slate-500 flex items-center gap-1.5">
+                        Broker: <span id="broker-ip" class="font-medium text-slate-600">broker.emqx.io</span>
+                    </div>
+                </div>
+
+                <!-- ML Config Form -->
+                <div class="border-t border-slate-100 pt-6">
+                    <h2 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-3">
+                        Konfigurasi ML
+                    </h2>
+                    <p class="text-xs text-slate-500 mb-4 leading-relaxed">
+                        Sesuaikan parameter biologis tanaman untuk inferensi Random Forest di server.
+                    </p>
+
+                    <form id="ml-config-form" class="space-y-4">
+                        <div>
+                            <label for="crop_id" class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">
+                                Jenis Tanaman
+                            </label>
+                            <select id="crop_id" name="crop_id" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-colors">
+                                <option value="Wheat">Wheat (Gandum)</option>
+                                <option value="Potato">Potato (Kentang)</option>
+                                <option value="Carrot">Carrot (Wortel)</option>
+                                <option value="Tomato">Tomato (Tomat)</option>
+                                <option value="Chilli">Chilli (Cabai)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="soil_type" class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">
+                                Jenis Tanah
+                            </label>
+                            <select id="soil_type" name="soil_type" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-colors">
+                                <option value="Black Soil">Black Soil (Tanah Hitam)</option>
+                                <option value="Alluvial Soil">Alluvial Soil (Aluvial)</option>
+                                <option value="Sandy Soil">Sandy Soil (Berpasir)</option>
+                                <option value="Red Soil">Red Soil (Tanah Merah)</option>
+                                <option value="Clay Soil">Clay Soil (Tanah Liat)</option>
+                                <option value="Loam Soil">Loam Soil (Tanah Lempung)</option>
+                                <option value="Chalky Soil">Chalky Soil (Kapur)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="seedling_stage" class="block text-xs font-semibold text-slate-600 uppercase mb-1.5">
+                                Tahap Tumbuh
+                            </label>
+                            <select id="seedling_stage" name="seedling_stage" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-colors">
+                                <option value="Germination">Germination (Perkecambahan)</option>
+                                <option value="Seedling Stage">Seedling Stage (Bibit)</option>
+                                <option value="Vegetative Growth / Root or Tuber Development">Vegetative (Pertumbuhan)</option>
+                                <option value="Flowering">Flowering (Pembungaan)</option>
+                                <option value="Pollination">Pollination (Penyerbukan)</option>
+                                <option value="Fruit/Grain/Bulb Formation">Formation (Pembentukan Buah)</option>
+                                <option value="Maturation">Maturation (Pematangan)</option>
+                                <option value="Harvest">Harvest (Panen)</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2" id="btn-update-config">
+                            <span class="btn-text">Perbarui Parameter</span>
+                            <i class="fa-solid fa-arrows-rotate spinner-icon hidden animate-spin" aria-hidden="true"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 p-6 lg:p-8 flex flex-col justify-between" id="main-content">
+            <div>
+                <!-- Topbar / Header -->
+                <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+                    <div>
+                        <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Dasbor Pemantauan Real-Time</h1>
+                        <p class="text-sm text-slate-500">Menerima data telemetri dari ESP32 secara asinkron via MQTT.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div id="device-status-badge" class="flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-[11px] font-bold tracking-wider uppercase transition-all duration-300 bg-slate-50 text-slate-500 border-slate-200 shadow-sm">
+                            <span class="w-2 h-2 rounded-full bg-slate-400" id="device-status-dot"></span>
+                            <span id="device-status-text">Mengecek Status...</span>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Grid Telemetry & Decisions -->
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
+                    <!-- Suhu Card -->
+                    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Suhu Udara</span>
+                            <div class="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                                <i class="fa-solid fa-temperature-half text-lg" aria-hidden="true"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-baseline gap-1 mb-1">
+                                <span class="text-3xl font-extrabold text-slate-900 tracking-tight" id="val-temp" aria-live="polite" aria-atomic="true">--</span>
+                                <span class="text-sm font-semibold text-slate-500">°C</span>
+                            </div>
+                            <span class="text-xs font-medium text-slate-400" id="status-temp">Membaca data...</span>
+                        </div>
+                    </div>
+
+                    <!-- Kelembapan Udara Card -->
+                    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Kelembapan Udara</span>
+                            <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                                <i class="fa-solid fa-wind text-lg" aria-hidden="true"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-baseline gap-1 mb-1">
+                                <span class="text-3xl font-extrabold text-slate-900 tracking-tight" id="val-hum" aria-live="polite" aria-atomic="true">--</span>
+                                <span class="text-sm font-semibold text-slate-500">%</span>
+                            </div>
+                            <span class="text-xs font-medium text-slate-400" id="status-hum">Membaca data...</span>
+                        </div>
+                    </div>
+
+                    <!-- Kelembapan Tanah Card -->
+                    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Kelembapan Tanah</span>
+                            <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                                <i class="fa-solid fa-faucet-drip text-lg" aria-hidden="true"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex items-baseline gap-1 mb-1">
+                                <span class="text-3xl font-extrabold text-slate-900 tracking-tight" id="val-soil" aria-live="polite" aria-atomic="true">--</span>
+                                <span class="text-sm font-semibold text-slate-500">%</span>
+                            </div>
+                            <span class="text-xs font-medium text-slate-400" id="status-soil">Membaca data...</span>
+                        </div>
+                    </div>
+
+                    <!-- Tangki Air Card (with dynamic water level wave) -->
+                    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[140px]">
+                        <div class="relative z-10 flex items-center justify-between mb-4">
+                            <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Tangki Air</span>
+                            <div class="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                                <i class="fa-solid fa-glass-water text-lg" aria-hidden="true"></i>
+                            </div>
+                        </div>
+                        <div class="relative z-10">
+                            <div class="flex items-baseline gap-1 mb-1">
+                                <span class="text-3xl font-extrabold text-slate-900 tracking-tight" id="val-water" aria-live="polite" aria-atomic="true">--</span>
+                                <span class="text-sm font-semibold text-slate-500">%</span>
+                            </div>
+                            <span class="text-xs font-medium text-slate-400" id="status-water">Membaca data...</span>
+                        </div>
+                        <!-- wave background container inside the card -->
+                        <div class="absolute bottom-0 left-0 w-full water-wave-transition opacity-25 z-0" id="water-wave" style="height: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Decision & Actuator Row -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <!-- ML Recommendation Card -->
+                    <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between mb-4">
+                                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Rekomendasi Irigasi (ML)</span>
+                                <i class="fa-solid fa-brain text-emerald-600 text-lg" aria-hidden="true"></i>
+                            </div>
+                            <div class="flex items-center gap-4 mb-4">
+                                <span id="val-decision" class="text-lg font-bold px-3 py-1.5 rounded-lg border transition-all duration-300" aria-live="polite" aria-atomic="true">WAIT</span>
+                                <div class="flex-1">
+                                    <div class="flex justify-between text-xs text-slate-500 mb-1.5">
+                                        <span>Keyakinan (Confidence)</span>
+                                        <span id="val-confidence" class="font-bold text-slate-700" aria-live="polite">0%</span>
+                                    </div>
+                                    <div class="w-full bg-slate-100 rounded-full h-2">
+                                        <div id="val-confidence-bar" class="bg-emerald-600 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="border-t border-slate-100 pt-3 text-xs text-slate-400 flex items-center gap-1.5 mt-auto">
+                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i> Diprediksi oleh Model Random Forest secara asinkron.
+                        </div>
+                    </div>
+
+                    <!-- Pump Status Card -->
+                    <div id="pump-card" class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between transition-all duration-300">
+                        <div>
+                            <div class="flex items-center justify-between mb-4">
+                                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Status Pompa Air</span>
+                                <i class="fa-solid fa-circle-nodes text-slate-400 text-lg" aria-hidden="true"></i>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <div class="w-12 h-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 transition-colors duration-300 pump-visual">
+                                    <i class="fa-solid fa-gear text-xl" id="pump-gear" aria-hidden="true"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <span id="val-pump" class="inline-block text-xs font-bold px-3 py-1.5 rounded-lg tracking-wide uppercase shadow-sm" aria-live="polite">NONAKTIF</span>
+                                    <div id="safety-warning" class="text-rose-600 text-xs font-semibold mt-1.5 flex items-center gap-1.5 hidden">
+                                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                                        Proteksi: Air Habis (&lt;15%)! Pompa terkunci OFF.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="border-t border-slate-100 pt-3 text-xs text-slate-400 flex items-center gap-1.5 mt-auto">
+                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i> Status real-time berdasarkan instruksi mikrokontroler.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ApexCharts Real-time Chart Card -->
+                <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-chart-line text-emerald-600"></i> Grafik Telemetri Real-Time
+                        </h3>
+                    </div>
+                    <div class="w-full">
+                        <div id="telemetryChart"></div>
+                    </div>
+                </div>
+
+                <!-- Logs History Table Card -->
+                <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-clock-rotate-left text-emerald-600"></i> Log Aktivitas Sistem (15 Terakhir)
+                        </h3>
+                        <button id="btn-refresh-logs" class="text-slate-500 hover:text-slate-700 bg-slate-50 border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" title="Segarkan Log" aria-label="Segarkan Log">
+                            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Segarkan
+                        </button>
+                    </div>
+                    
+                    <div class="overflow-x-auto custom-scrollbar border border-slate-100 rounded-xl">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    <th class="py-3.5 px-4">Waktu</th>
+                                    <th class="py-3.5 px-4">Suhu</th>
+                                    <th class="py-3.5 px-4">Kelembapan</th>
+                                    <th class="py-3.5 px-4">Moisture</th>
+                                    <th class="py-3.5 px-4">Air</th>
+                                    <th class="py-3.5 px-4">Keputusan</th>
+                                    <th class="py-3.5 px-4">Conf.</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-tbody" class="text-xs text-slate-600 divide-y divide-slate-100">
+                                <tr>
+                                    <td colspan="7" class="text-center py-8 text-slate-400 font-medium">Menunggu telemetri pertama dari broker MQTT...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Alert System Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 z-50 bg-white border border-slate-200 shadow-xl rounded-xl p-4 flex items-center gap-3 transition-all duration-300 max-w-sm hidden" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm shrink-0">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        </div>
+        <div>
+            <span class="toast-message block text-sm font-semibold text-slate-800">Pesan notifikasi</span>
+        </div>
+    </div>
+
+    <!-- Custom JS -->
+    <script>
+        let chart;
+        const chartOptions = {
+            series: [
+                { name: 'Suhu (°C)', data: [] },
+                { name: 'Kelembapan Udara (%)', data: [] },
+                { name: 'Kelembapan Tanah (%)', data: [] },
+                { name: 'Level Air (%)', data: [] }
+            ],
+            chart: {
+                type: 'line',
+                height: 350,
+                toolbar: { show: false },
+                animations: { enabled: true, easing: 'linear', dynamicAnimation: { speed: 500 } }
+            },
+            colors: ['#ef4444', '#3b82f6', '#10b981', '#0ea5e9'],
+            stroke: { width: 3, curve: 'smooth' },
+            grid: { borderColor: '#f1f5f9' },
+            xaxis: {
+                type: 'category',
+                categories: [],
+                labels: { style: { colors: '#64748b', fontFamily: 'Outfit' } }
+            },
+            yaxis: {
+                min: 0,
+                max: 100,
+                labels: { style: { colors: '#64748b', fontFamily: 'Outfit' } }
+            },
+            legend: { position: 'top', horizontalAlign: 'right', fontFamily: 'Outfit', labels: { colors: '#475569' } }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            chart = new ApexCharts(document.querySelector("#telemetryChart"), chartOptions);
+            chart.render();
+            
+            // Load config and start polling
+            loadConfig();
+            fetchHistory();
+            setInterval(fetchHistory, 2000);
+            
+            document.getElementById('btn-refresh-logs').addEventListener('click', fetchHistory);
+        });
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                if (res.ok) {
+                    const config = await res.json();
+                    document.getElementById('crop_id').value = config.crop_id;
+                    document.getElementById('soil_type').value = config.soil_type;
+                    document.getElementById('seedling_stage').value = config.seedling_stage;
+                }
+            } catch (err) {
+                console.error('Error loading config:', err);
+            }
+        }
+
+        document.getElementById('ml-config-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btn-update-config');
+            const spinner = btn.querySelector('.spinner-icon');
+            const btnText = btn.querySelector('.btn-text');
+            
+            btn.disabled = true;
+            spinner.classList.remove('hidden');
+            btnText.textContent = 'Memperbarui...';
+            
+            const payload = {
+                crop_id: document.getElementById('crop_id').value,
+                soil_type: document.getElementById('soil_type').value,
+                seedling_stage: document.getElementById('seedling_stage').value
+            };
+            
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    showToast('Konfigurasi ML berhasil diperbarui');
+                } else {
+                    showToast('Gagal memperbarui konfigurasi');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Terjadi kesalahan jaringan');
+            } finally {
+                btn.disabled = false;
+                spinner.classList.add('hidden');
+                btnText.textContent = 'Perbarui Parameter';
+            }
+        });
+
+        async function fetchHistory() {
+            try {
+                const res = await fetch('/history?limit=15');
+                if (!res.ok) return;
+                const data = await res.json();
+                const predictions = data.predictions || [];
+                if (predictions.length === 0) return;
+                
+                // Get latest prediction
+                const latest = predictions[predictions.length - 1];
+                
+                // Calculate online status (online if telemetry received within last 30 seconds)
+                const latestTime = new Date(latest.timestamp);
+                const timeDiffSeconds = Math.abs(new Date() - latestTime) / 1000;
+                const isOnline = timeDiffSeconds < 30;
+                
+                const statusBadge = document.getElementById('device-status-badge');
+                const statusDot = document.getElementById('device-status-dot');
+                const statusText = document.getElementById('device-status-text');
+                
+                if (statusBadge && statusDot && statusText) {
+                    if (isOnline) {
+                        statusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-[11px] font-bold tracking-wider uppercase transition-all duration-300 bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm';
+                        statusDot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+                        statusText.textContent = 'ESP32 ONLINE';
+                    } else {
+                        statusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-[11px] font-bold tracking-wider uppercase transition-all duration-300 bg-rose-50 text-rose-700 border-rose-200 shadow-sm';
+                        statusDot.className = 'w-2 h-2 rounded-full bg-rose-500';
+                        statusText.textContent = 'ESP32 OFFLINE';
+                    }
+                }
+                
+                // Update numeric metrics
+                updateMetric('val-temp', 'status-temp', latest.processed_features.temperature, '°C', isOnline);
+                updateMetric('val-hum', 'status-hum', latest.processed_features.humidity, '%', isOnline);
+                updateMetric('val-soil', 'status-soil', latest.processed_features.soil_moisture, '%', isOnline);
+                updateMetric('val-water', 'status-water', latest.water_level, '%', isOnline);
+                
+                // Update Water wave indicator
+                const waterWave = document.getElementById('water-wave');
+                if (waterWave) {
+                    if (isOnline) {
+                        waterWave.style.height = `${latest.water_level}%`;
+                        if (latest.water_level < 15) {
+                            waterWave.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+                        } else {
+                            waterWave.style.backgroundColor = 'rgba(14, 165, 233, 0.15)';
+                        }
+                    } else {
+                        waterWave.style.height = '0%';
+                        waterWave.style.backgroundColor = 'rgba(203, 213, 225, 0.1)';
+                    }
+                }
+                
+                // Update Decision
+                const decisionEl = document.getElementById('val-decision');
+                if (decisionEl) {
+                    decisionEl.className = 'text-lg font-bold px-3 py-1.5 rounded-lg border transition-all duration-300 ';
+                    if (!isOnline) {
+                        decisionEl.textContent = '—';
+                        decisionEl.classList.add('bg-slate-50', 'text-slate-400', 'border-slate-200');
+                    } else {
+                        decisionEl.textContent = latest.label;
+                        if (latest.prediction === 0) {
+                            decisionEl.classList.add('bg-slate-50', 'text-slate-700', 'border-slate-200');
+                        } else if (latest.prediction === 1) {
+                            decisionEl.classList.add('bg-emerald-50', 'text-emerald-700', 'border-emerald-200');
+                        } else if (latest.prediction === 2) {
+                            decisionEl.classList.add('bg-blue-50', 'text-blue-700', 'border-blue-200');
+                        }
+                    }
+                }
+                
+                // Update Confidence
+                const confidencePct = Math.round(latest.confidence * 100);
+                const confValEl = document.getElementById('val-confidence');
+                const confBarEl = document.getElementById('val-confidence-bar');
+                if (confValEl) confValEl.textContent = isOnline ? `${confidencePct}%` : '—';
+                if (confBarEl) confBarEl.style.width = isOnline ? `${confidencePct}%` : '0%';
+                
+                // Update Pump status card
+                const pumpCard = document.getElementById('pump-card');
+                const pumpText = document.getElementById('val-pump');
+                const pumpGear = document.getElementById('pump-gear');
+                const safetyWarning = document.getElementById('safety-warning');
+                const pumpVisual = document.querySelector('.pump-visual');
+                
+                if (!isOnline) {
+                    if (safetyWarning) safetyWarning.classList.add('hidden');
+                    if (pumpText) {
+                        pumpText.textContent = 'OFFLINE';
+                        pumpText.className = 'inline-block text-xs font-bold px-3 py-1.5 rounded-lg tracking-wide uppercase shadow-sm bg-slate-100 text-slate-400 border border-slate-200';
+                    }
+                    if (pumpCard) {
+                        pumpCard.className = 'bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between transition-all duration-300 opacity-70';
+                    }
+                    if (pumpGear) pumpGear.classList.remove('animate-slow-spin');
+                    if (pumpVisual) pumpVisual.className = 'w-12 h-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 transition-colors duration-300 pump-visual';
+                } else if (latest.water_level < 15) {
+                    if (safetyWarning) safetyWarning.classList.remove('hidden');
+                    if (pumpText) {
+                        pumpText.textContent = 'TERKUNCI OFF';
+                        pumpText.className = 'inline-block text-xs font-bold px-3 py-1.5 rounded-lg tracking-wide uppercase shadow-sm bg-rose-50 text-rose-700 border border-rose-200';
+                    }
+                    if (pumpCard) {
+                        pumpCard.className = 'bg-white border border-rose-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between transition-all duration-300 bg-rose-50/5';
+                    }
+                    if (pumpGear) pumpGear.classList.remove('animate-slow-spin');
+                    if (pumpVisual) pumpVisual.className = 'w-12 h-12 rounded-full bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-500 transition-colors duration-300 pump-visual';
+                } else {
+                    if (safetyWarning) safetyWarning.classList.add('hidden');
+                    if (latest.action === 1) {
+                        if (pumpText) {
+                            pumpText.textContent = 'AKTIF';
+                            pumpText.className = 'inline-block text-xs font-bold px-3 py-1.5 rounded-lg tracking-wide uppercase shadow-sm bg-emerald-50 text-emerald-700 border border-emerald-200';
+                        }
+                        if (pumpCard) {
+                            pumpCard.className = 'bg-white border border-emerald-500 rounded-2xl p-6 shadow-sm flex flex-col justify-between transition-all duration-300 bg-emerald-50/10';
+                        }
+                        if (pumpGear) pumpGear.classList.add('animate-slow-spin');
+                        if (pumpVisual) pumpVisual.className = 'w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 transition-colors duration-300 pump-visual';
+                    } else {
+                        if (pumpText) {
+                            pumpText.textContent = 'NONAKTIF';
+                            pumpText.className = 'inline-block text-xs font-bold px-3 py-1.5 rounded-lg tracking-wide uppercase shadow-sm bg-slate-50 text-slate-500 border border-slate-200';
+                        }
+                        if (pumpCard) {
+                            pumpCard.className = 'bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between transition-all duration-300';
+                        }
+                        if (pumpGear) pumpGear.classList.remove('animate-slow-spin');
+                        if (pumpVisual) pumpVisual.className = 'w-12 h-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 transition-colors duration-300 pump-visual';
+                    }
+                }
+                
+                // Update Table Logs
+                const tbody = document.getElementById('logs-tbody');
+                if (tbody) {
+                    tbody.innerHTML = '';
+                    predictions.slice().reverse().forEach(pred => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-slate-50/80 transition-colors';
+                        
+                        const date = new Date(pred.timestamp);
+                        const timeStr = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        
+                        let labelClass = 'bg-slate-50 text-slate-600 border-slate-100';
+                        if (pred.prediction === 1) labelClass = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+                        if (pred.prediction === 2) labelClass = 'bg-blue-50 text-blue-700 border-blue-100';
+                        
+                        tr.innerHTML = `
+                            <td class="py-3 px-4 font-medium text-slate-500">${timeStr}</td>
+                            <td class="py-3 px-4 font-semibold text-slate-700">${pred.processed_features.temperature.toFixed(1)}°C</td>
+                            <td class="py-3 px-4 text-slate-600">${pred.processed_features.humidity.toFixed(1)}%</td>
+                            <td class="py-3 px-4 text-slate-600">${pred.processed_features.soil_moisture.toFixed(1)}%</td>
+                            <td class="py-3 px-4 text-slate-600">${pred.water_level}%</td>
+                            <td class="py-3 px-4">
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${labelClass}">${pred.label}</span>
+                            </td>
+                            <td class="py-3 px-4 font-semibold text-slate-700">${Math.round(pred.confidence * 100)}%</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+                
+                // Update ApexCharts
+                const times = predictions.map(p => {
+                    const d = new Date(p.timestamp);
+                    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                });
+                const temps = predictions.map(p => p.processed_features.temperature);
+                const hums = predictions.map(p => p.processed_features.humidity);
+                const soils = predictions.map(p => p.processed_features.soil_moisture);
+                const waters = predictions.map(p => p.water_level);
+                
+                chart.updateSeries([
+                    { name: 'Suhu (°C)', data: temps },
+                    { name: 'Kelembapan Udara (%)', data: hums },
+                    { name: 'Kelembapan Tanah (%)', data: soils },
+                    { name: 'Level Air (%)', data: waters }
+                ]);
+                chart.updateOptions({
+                    xaxis: { categories: times }
+                });
+                
+            } catch (err) {
+                console.error('Error fetching history:', err);
+            }
+        }
+
+        function updateMetric(valId, statusId, value, unit, isOnline) {
+            const valEl = document.getElementById(valId);
+            const statusEl = document.getElementById(statusId);
+            if (valEl) {
+                if (isOnline) {
+                    valEl.textContent = value.toFixed(1);
+                    valEl.classList.remove('text-slate-400');
+                    valEl.classList.add('text-slate-900');
+                } else {
+                    valEl.textContent = '—';
+                    valEl.classList.remove('text-slate-900');
+                    valEl.classList.add('text-slate-400');
+                }
+            }
+            if (statusEl) {
+                if (isOnline) {
+                    statusEl.textContent = 'Terhubung';
+                    statusEl.className = 'text-xs font-semibold text-emerald-600';
+                } else {
+                    statusEl.textContent = 'Terputus';
+                    statusEl.className = 'text-xs font-semibold text-rose-500';
+                }
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            const toastMsg = toast.querySelector('.toast-message');
+            if (toast && toastMsg) {
+                toastMsg.textContent = msg;
+                toast.classList.remove('hidden');
+                setTimeout(() => {
+                    toast.classList.add('hidden');
+                }, 3000);
+            }
+        }
+    </script>
+</body>
+</html>
