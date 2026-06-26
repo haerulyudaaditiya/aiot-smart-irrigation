@@ -411,15 +411,15 @@ def model_info():
 # ==============================================================================
 # RUN SERVER
 # ==============================================================================
+# Jalankan client MQTT untuk mode produksi (Gunicorn) atau mode pengembangan lokal
+if __name__ != '__main__' or not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    start_mqtt_client()
+
 if __name__ == '__main__':
     print("="*80)
     print("  AIoT Smart Irrigation Flask API Server")
     print("="*80)
     print(f"  Server berjalan pada host: {HOST}:{PORT}")
     print("="*80 + "\n")
-
-    # Jalankan client MQTT (hindari koneksi ganda jika dalam mode debug Flask)
-    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        start_mqtt_client()
 
     app.run(host=HOST, port=PORT, debug=True)
