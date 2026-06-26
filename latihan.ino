@@ -9,8 +9,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+// LCD removed (tidak dipakai)
 
 // WiFi Configuration
 const char* WIFI_SSID     = "S21 FE";
@@ -43,7 +42,7 @@ const int WATER_FULL  = 3000;
 
 // Object Initialization
 DHT dht(DHTPIN, DHTTYPE);
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+// LCD removed
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
@@ -63,6 +62,9 @@ const unsigned long SEND_INTERVAL = 5000;  // Kirim setiap 5 detik
 
 bool serverConnected = false;
 
+unsigned long lastWiFiRetry = 0;
+const unsigned long WIFI_RETRY_INTERVAL = 10000;  // Retry WiFi setiap 10 detik
+
 // Function Prototypes
 void connectWiFi();
 void reconnectMQTT();
@@ -71,7 +73,7 @@ void printSensorData();
 void publishTelemetry();
 void controlOutputs();
 void updateLEDs();
-void updateLCD();
+// void updateLCD(); // LCD removed
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 
 void setup() {
@@ -93,58 +95,32 @@ void setup() {
   // Initialize DHT22
   dht.begin();
 
-  // Initialize LCD
-  Wire.begin(21, 22);  // SDA=21, SCL=22
-  lcd.init();
-  lcd.backlight();
-  lcd.setCursor(0, 0);
-  lcd.print("AIoT Irrigation");
-  lcd.setCursor(0, 1);
-  lcd.print("Connecting WiFi");
+  // LCD removed
 
   // Connect to WiFi
   connectWiFi();
 
-  // Show IP on LCD
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("IP:");
-  lcd.print(WiFi.localIP());
-  lcd.setCursor(0, 1);
-  lcd.print("Connecting MQTT");
-  delay(1000);
+  // LCD removed
 
   // Initialize MQTT
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
   reconnectMQTT();
 
-  if (mqttClient.connected()) {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("MQTT Connected!");
-    lcd.setCursor(0, 1);
-    lcd.print("Sistem Siap!");
-  } else {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("MQTT Failed!");
-    lcd.setCursor(0, 1);
-    lcd.print("Sistem Siap!");
-  }
-  delay(1500);
+  delay(500);
 }
 
 void loop() {
-  // Reconnect WiFi if disconnected
+  // Feed watchdog
+  yield();
+
+  // Reconnect WiFi if disconnected (non-blocking with cooldown)
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[!] WiFi terputus, reconnecting...");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi Putus!");
-    lcd.setCursor(0, 1);
-    lcd.print("Reconnecting...");
-    connectWiFi();
+    if (millis() - lastWiFiRetry >= WIFI_RETRY_INTERVAL) {
+      lastWiFiRetry = millis();
+      Serial.println("[!] WiFi terputus, reconnecting...");
+      connectWiFi();
+    }
   }
 
   // Reconnect MQTT if disconnected
@@ -171,8 +147,7 @@ void loop() {
     // 4. Control outputs based on prediction
     controlOutputs();
 
-    // 5. Update LCD
-    updateLCD();
+    // LCD removed
   }
 
   // 6. Update LEDs (including non-blocking blinking if tank is empty)
@@ -182,12 +157,16 @@ void loop() {
 void connectWiFi() {
   Serial.print("[WiFi] Connecting to ");
   Serial.print(WIFI_SSID);
+  Serial.println("...");
 
+  WiFi.disconnect(true);  // Disconnect dulu untuk clean state
+  delay(100);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(250);
+    yield();  // Feed watchdog timer
     Serial.print(".");
     attempts++;
   }
@@ -201,25 +180,23 @@ void connectWiFi() {
     for (int i = 0; i < 3; i++) {
       digitalWrite(LED_GREEN_PIN, HIGH);
       digitalWrite(LED_RED_PIN, HIGH);
-      delay(200);
+      delay(150);
+      yield();
       digitalWrite(LED_GREEN_PIN, LOW);
       digitalWrite(LED_RED_PIN, LOW);
-      delay(200);
+      delay(150);
+      yield();
     }
   } else {
     Serial.println(" FAILED!");
     Serial.println("[WiFi] Cek SSID dan Password.");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi GAGAL!");
-    lcd.setCursor(0, 1);
-    lcd.print("Cek SSID/Pass");
   }
 }
 
 void reconnectMQTT() {
   int attempts = 0;
-  while (!mqttClient.connected() && attempts < 5) {
+  while (!mqttClient.connected() && attempts < 3) {
+    yield();  // Feed watchdog timer
     Serial.print("[MQTT] Mencoba menghubungkan ke broker...");
     // Generate unique client ID
     String clientId = "ESP32Client-" + String(random(0xffff), HEX);
@@ -232,8 +209,11 @@ void reconnectMQTT() {
     } else {
       Serial.print(" Gagal, rc=");
       Serial.print(mqttClient.state());
-      Serial.println(" Coba lagi dalam 2 detik...");
-      delay(2000);
+      Serial.println(" Coba lagi dalam 1 detik...");
+      delay(500);
+      yield();  // Feed watchdog timer
+      delay(500);
+      yield();  // Feed watchdog timer
       attempts++;
     }
   }
@@ -381,48 +361,4 @@ void updateLEDs() {
   }
 }
 
-void updateLCD() {
-  lcd.clear();
-
-  if (!serverConnected && prediction == -1) {
-    lcd.setCursor(0, 0);
-    lcd.print("T:");
-    lcd.print(temperature, 0);
-    lcd.print("C H:");
-    lcd.print(humidity, 0);
-    lcd.print("%");
-
-    lcd.setCursor(0, 1);
-    lcd.print("NO SERVER/MQTT");
-    return;
-  }
-
-  // Line 1: sensor data (compact)
-  lcd.setCursor(0, 0);
-  lcd.print("T:");
-  lcd.print(temperature, 0);
-  lcd.print("C H:");
-  lcd.print(humidity, 0);
-  lcd.print("% S:");
-  lcd.print(soilMoisture);
-  lcd.print("%");
-
-  // Line 2: ML prediction & Water Tank Status
-  lcd.setCursor(0, 1);
-
-  if (waterLevel < 15) {
-    lcd.print("ML:KOSONG");
-  } else if (prediction == 0) {
-    lcd.print("ML:AMAN  ");
-  } else if (prediction == 1) {
-    lcd.print("ML:SIRAM ");
-  } else if (prediction == 2) {
-    lcd.print("ML:BNYK! ");
-  } else {
-    lcd.print("ML:WAIT  ");
-  }
-
-  lcd.print(" W:");
-  lcd.print(waterLevel);
-  lcd.print("%");
-}
+// LCD removed - semua fungsi updateLCD() dihapus
