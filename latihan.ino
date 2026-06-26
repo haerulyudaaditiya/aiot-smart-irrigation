@@ -82,12 +82,11 @@ void setup() {
   Serial.println("╚════════════════════════════════════════╝");
 
   // Initialize output pins
-  pinMode(RELAY_PIN, OUTPUT);
   pinMode(LED_RED_PIN, OUTPUT);
   pinMode(LED_GREEN_PIN, OUTPUT);
 
   // Turn off all outputs initially
-  digitalWrite(RELAY_PIN, RELAY_OFF);
+  pinMode(RELAY_PIN, INPUT_PULLUP); // Set as INPUT_PULLUP to turn OFF 5V active-low relay cleanly with pull-up
   digitalWrite(LED_RED_PIN, LOW);
   digitalWrite(LED_GREEN_PIN, LOW);
 
@@ -326,24 +325,25 @@ void publishTelemetry() {
 
 void controlOutputs() {
   if (prediction < 0) {
-    digitalWrite(RELAY_PIN, RELAY_OFF);      // Safety: relay OFF
+    pinMode(RELAY_PIN, INPUT_PULLUP);        // Set as INPUT_PULLUP to turn OFF relay cleanly
     Serial.println("[AKSI] Menunggu prediksi dari server...");
     return;
   }
 
   // Override: Protection when water tank is empty
   if (waterLevel < 15) {
-    digitalWrite(RELAY_PIN, RELAY_OFF);      // Turn off watering
+    pinMode(RELAY_PIN, INPUT_PULLUP);        // Set as INPUT_PULLUP to turn OFF relay cleanly
     Serial.println("[AKSI] Override: Sumber air habis! Penyiraman dinonaktifkan untuk proteksi.");
     return;
   }
 
   // Use action from server
   if (action == 1) {
-    digitalWrite(RELAY_PIN, RELAY_ON);     // Relay ON -> Valve/Pump ON
+    pinMode(RELAY_PIN, OUTPUT);
+    digitalWrite(RELAY_PIN, RELAY_ON);      // Relay ON -> Valve/Pump ON
     Serial.printf("[AKSI] Relay ON -> POMPA AKTIF (%s)\n", predLabel.c_str());
   } else {
-    digitalWrite(RELAY_PIN, RELAY_OFF);      // Relay OFF -> Valve/Pump OFF
+    pinMode(RELAY_PIN, INPUT_PULLUP);        // Set as INPUT_PULLUP to turn OFF relay cleanly
     Serial.println("[AKSI] Relay OFF -> Pompa MATI (aman)");
   }
 }
