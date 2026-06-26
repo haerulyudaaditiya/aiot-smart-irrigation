@@ -323,6 +323,16 @@ def predict():
 # ==============================================================================
 mqtt_client = None
 mqtt_error = None
+mqtt_logs = []
+
+def on_log(client, userdata, level, buf):
+    """Callback logging dari Paho MQTT."""
+    global mqtt_logs
+    log_msg = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {buf}"
+    mqtt_logs.append(log_msg)
+    if len(mqtt_logs) > 50:
+        mqtt_logs.pop(0)
+    print(f"[MQTT LOG] {buf}")
 
 def on_connect(client, userdata, flags, rc, properties=None):
     """Callback saat terhubung ke broker MQTT."""
@@ -377,6 +387,7 @@ def start_mqtt_client():
 
     mqtt_client.on_connect = on_connect
     mqtt_client.on_message = on_message
+    mqtt_client.on_log = on_log
 
     try:
         mqtt_error = "Connecting..."
@@ -402,7 +413,7 @@ def history():
 @app.route('/mqtt-status', methods=['GET'])
 def mqtt_status():
     """Mengecek status koneksi MQTT client."""
-    global mqtt_client, mqtt_error
+    global mqtt_client, mqtt_error, mqtt_logs
     is_initialized = mqtt_client is not None
     is_connected = False
     if is_initialized:
@@ -414,6 +425,7 @@ def mqtt_status():
         'initialized': is_initialized,
         'connected': is_connected,
         'error': mqtt_error,
+        'logs': mqtt_logs,
         'broker': MQTT_BROKER,
         'port': MQTT_PORT,
         'topic_sensor': MQTT_TOPIC_SENSOR,
@@ -459,11 +471,20 @@ def model_info():
 
 
 # ==============================================================================
-# RUN SERVER
+# RUN SERVER / INITIALIZATION HOOKS
 # ==============================================================================
-# Jalankan client MQTT untuk mode produksi (Gunicorn) atau mode pengembangan lokal
-if __name__ != '__main__' or not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-    start_mqtt_client()
+mqtt_initialized = False
+
+@app.before_request
+def init_mqtt_lazy():
+    """Menginisialisasi MQTT secara malas pada request pertama di worker process."""
+    global mqtt_initialized
+    if not mqtt_initialized:
+        if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+            print("[Flask] First request received, lazy-initializing MQTT client...")
+            start_mqtt_client()
+        mqtt_initialized = True
+
 
 if __name__ == '__main__':
     print("="*80)
