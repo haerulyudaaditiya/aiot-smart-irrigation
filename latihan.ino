@@ -31,6 +31,10 @@ const char* MQTT_TOPIC_CONTROL = "aiot/smart_irrigation/control";
 #define LED_RED_PIN       4     // LED Merah (perlu siram)
 #define LED_GREEN_PIN     5     // LED Hijau (aman)
 
+// Relay Logic Configuration (Active-Low)
+#define RELAY_ON          LOW
+#define RELAY_OFF         HIGH
+
 // Sensor Calibration Values
 const int SOIL_DRY   = 3400;
 const int SOIL_WET   = 1500;
@@ -83,7 +87,7 @@ void setup() {
   pinMode(LED_GREEN_PIN, OUTPUT);
 
   // Turn off all outputs initially
-  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(RELAY_PIN, RELAY_OFF);
   digitalWrite(LED_RED_PIN, LOW);
   digitalWrite(LED_GREEN_PIN, LOW);
 
@@ -322,24 +326,24 @@ void publishTelemetry() {
 
 void controlOutputs() {
   if (prediction < 0) {
-    digitalWrite(RELAY_PIN, LOW);      // Safety: relay OFF
+    digitalWrite(RELAY_PIN, RELAY_OFF);      // Safety: relay OFF
     Serial.println("[AKSI] Menunggu prediksi dari server...");
     return;
   }
 
   // Override: Protection when water tank is empty
   if (waterLevel < 15) {
-    digitalWrite(RELAY_PIN, LOW);      // Turn off watering
+    digitalWrite(RELAY_PIN, RELAY_OFF);      // Turn off watering
     Serial.println("[AKSI] Override: Sumber air habis! Penyiraman dinonaktifkan untuk proteksi.");
     return;
   }
 
   // Use action from server
   if (action == 1) {
-    digitalWrite(RELAY_PIN, HIGH);     // Relay ON -> Valve/Pump ON
+    digitalWrite(RELAY_PIN, RELAY_ON);     // Relay ON -> Valve/Pump ON
     Serial.printf("[AKSI] Relay ON -> POMPA AKTIF (%s)\n", predLabel.c_str());
   } else {
-    digitalWrite(RELAY_PIN, LOW);      // Relay OFF -> Valve/Pump OFF
+    digitalWrite(RELAY_PIN, RELAY_OFF);      // Relay OFF -> Valve/Pump OFF
     Serial.println("[AKSI] Relay OFF -> Pompa MATI (aman)");
   }
 }
