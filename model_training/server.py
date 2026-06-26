@@ -421,6 +421,26 @@ def mqtt_status():
     })
 
 
+@app.route('/test-connection', methods=['GET'])
+def test_connection():
+    """Menguji konektivitas soket TCP langsung ke broker."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(3.0)
+        s.connect((MQTT_BROKER, MQTT_PORT))
+        s.close()
+        return jsonify({
+            'status': 'success',
+            'message': f'Berhasil terhubung ke {MQTT_BROKER}:{MQTT_PORT} via TCP socket.'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Gagal terhubung ke {MQTT_BROKER}:{MQTT_PORT}: {e}'
+        })
+
+
 @app.route('/model-info', methods=['GET'])
 def model_info():
     """Informasi metadata model."""
