@@ -460,7 +460,8 @@
                 
                 // Calculate online status (online if telemetry received within last 30 seconds)
                 const latestTime = new Date(latest.timestamp);
-                const timeDiffSeconds = Math.abs(new Date() - latestTime) / 1000;
+                const serverTime = data.server_time ? new Date(data.server_time) : new Date();
+                const timeDiffSeconds = Math.abs(serverTime - latestTime) / 1000;
                 const isOnline = timeDiffSeconds < 30;
                 
                 const statusBadge = document.getElementById('device-status-badge');

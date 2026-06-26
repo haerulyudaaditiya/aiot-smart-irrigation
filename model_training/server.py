@@ -386,7 +386,8 @@ def history():
     limit = request.args.get('limit', 50, type=int)
     return jsonify({
         'count': len(prediction_history),
-        'predictions': prediction_history[-limit:]
+        'predictions': prediction_history[-limit:],
+        'server_time': datetime.datetime.now().isoformat()
     })
 
 
