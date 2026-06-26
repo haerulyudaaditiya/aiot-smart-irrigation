@@ -16,6 +16,7 @@
 import os
 import json
 import datetime
+import threading
 import csv
 import pandas as pd
 from flask import Flask, request, jsonify, render_template
@@ -474,16 +475,20 @@ def model_info():
 # RUN SERVER / INITIALIZATION HOOKS
 # ==============================================================================
 mqtt_initialized = False
+mqtt_init_lock = threading.Lock()
 
 @app.before_request
 def init_mqtt_lazy():
     """Menginisialisasi MQTT secara malas pada request pertama di worker process."""
     global mqtt_initialized
-    if not mqtt_initialized:
-        if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-            print("[Flask] First request received, lazy-initializing MQTT client...")
-            start_mqtt_client()
-        mqtt_initialized = True
+    if mqtt_initialized:
+        return
+    with mqtt_init_lock:
+        if not mqtt_initialized:
+            if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+                print("[Flask] First request received, lazy-initializing MQTT client...")
+                start_mqtt_client()
+            mqtt_initialized = True
 
 
 if __name__ == '__main__':
