@@ -112,7 +112,7 @@ def load_prediction_history_from_csv():
                             'soil_type': row.get('soil_type', 'Black Soil'),
                             'seedling_stage': row.get('seedling_stage', 'Germination')
                         },
-                        'timestamp': row.get('timestamp', datetime.datetime.now().isoformat())
+                        'timestamp': row.get('timestamp', datetime.datetime.now(datetime.timezone.utc).isoformat())
                     }
                     temp_history.append(item)
                 except Exception:
@@ -141,7 +141,7 @@ def log_prediction(sensor_data, prediction, confidence, label):
                     'seedling_stage', 'prediction', 'label', 'confidence'
                 ])
             writer.writerow([
-                datetime.datetime.now().isoformat(),
+                datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 sensor_data.get('temperature'),
                 sensor_data.get('humidity'),
                 sensor_data.get('soil_moisture'),
@@ -199,7 +199,7 @@ def health():
     return jsonify({
         'status': 'ok',
         'model_loaded': MODEL_LOADED,
-        'timestamp': datetime.datetime.now().isoformat()
+        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()
     })
 
 
@@ -270,7 +270,7 @@ def perform_inference(data):
             'soil_type': soil_type,
             'seedling_stage': seedling_stage
         },
-        'timestamp': datetime.datetime.now().isoformat()
+        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
 
     # Logging ke file
@@ -407,7 +407,7 @@ def history():
     return jsonify({
         'count': len(prediction_history),
         'predictions': prediction_history[-limit:],
-        'server_time': datetime.datetime.now().isoformat()
+        'server_time': datetime.datetime.now(datetime.timezone.utc).isoformat()
     })
 
 
