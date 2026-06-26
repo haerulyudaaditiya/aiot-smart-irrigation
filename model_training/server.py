@@ -322,14 +322,18 @@ def predict():
 # MQTT CLIENT DAEMON
 # ==============================================================================
 mqtt_client = None
+mqtt_error = None
 
 def on_connect(client, userdata, flags, rc, properties=None):
     """Callback saat terhubung ke broker MQTT."""
+    global mqtt_error
     if rc == 0:
+        mqtt_error = "Connected successfully"
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Terhubung ke Broker {MQTT_BROKER}")
         client.subscribe(MQTT_TOPIC_SENSOR)
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Subscribed ke topik: {MQTT_TOPIC_SENSOR}")
     else:
+        mqtt_error = f"Gagal terhubung, return code {rc}"
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Gagal terhubung, return code {rc}")
 
 def on_message(client, userdata, msg):
@@ -363,7 +367,8 @@ def on_message(client, userdata, msg):
 
 def start_mqtt_client():
     """Inisialisasi MQTT client."""
-    global mqtt_client
+    global mqtt_client, mqtt_error
+    mqtt_error = "Initializing..."
     try:
         from paho.mqtt.enums import CallbackAPIVersion
         mqtt_client = mqtt.Client(callback_api_version=CallbackAPIVersion.VERSION2)
@@ -374,9 +379,12 @@ def start_mqtt_client():
     mqtt_client.on_message = on_message
 
     try:
+        mqtt_error = "Connecting..."
         mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
         mqtt_client.loop_start()
+        mqtt_error = "Loop started, waiting for connection callback..."
     except Exception as e:
+        mqtt_error = f"Exception: {str(e)}"
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MQTT] Gagal memulai client: {e}")
 
 
@@ -394,7 +402,7 @@ def history():
 @app.route('/mqtt-status', methods=['GET'])
 def mqtt_status():
     """Mengecek status koneksi MQTT client."""
-    global mqtt_client
+    global mqtt_client, mqtt_error
     is_initialized = mqtt_client is not None
     is_connected = False
     if is_initialized:
@@ -405,6 +413,7 @@ def mqtt_status():
     return jsonify({
         'initialized': is_initialized,
         'connected': is_connected,
+        'error': mqtt_error,
         'broker': MQTT_BROKER,
         'port': MQTT_PORT,
         'topic_sensor': MQTT_TOPIC_SENSOR,
