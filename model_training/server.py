@@ -391,6 +391,27 @@ def history():
     })
 
 
+@app.route('/mqtt-status', methods=['GET'])
+def mqtt_status():
+    """Mengecek status koneksi MQTT client."""
+    global mqtt_client
+    is_initialized = mqtt_client is not None
+    is_connected = False
+    if is_initialized:
+        try:
+            is_connected = mqtt_client.is_connected()
+        except Exception:
+            pass
+    return jsonify({
+        'initialized': is_initialized,
+        'connected': is_connected,
+        'broker': MQTT_BROKER,
+        'port': MQTT_PORT,
+        'topic_sensor': MQTT_TOPIC_SENSOR,
+        'topic_control': MQTT_TOPIC_CONTROL
+    })
+
+
 @app.route('/model-info', methods=['GET'])
 def model_info():
     """Informasi metadata model."""
